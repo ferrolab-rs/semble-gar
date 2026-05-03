@@ -351,7 +351,7 @@ class GraphStore:
         try:
             self.conn.close()
         except Exception:
-            pass
+            logger.debug("Error closing SQLite connection", exc_info=True)
 
 
 def _module_file_patterns(module_end: str) -> list[str]:

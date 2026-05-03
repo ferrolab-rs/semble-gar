@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from collections import defaultdict
@@ -235,7 +236,6 @@ class SembleIndex:
         try:
             return self._graph_store.get_relational_context(chunk_ids)
         except Exception:
-            import logging
             logging.getLogger(__name__).warning("Graph context lookup failed", exc_info=True)
             return {}
 
@@ -248,6 +248,16 @@ class SembleIndex:
             return contexts.get(chunk.location, GraphContext())
         except Exception:
             return GraphContext()
+
+    def get_symbols_for_chunk(self, chunk: Chunk) -> list[dict]:
+        """Return symbols (functions, classes) defined in *chunk*.
+
+        Delegates to the graph store.  Returns an empty list if no graph
+        data is available.
+        """
+        if not self._graph_store:
+            return []
+        return self._graph_store.get_symbols_by_chunk(chunk.location)
 
     def close(self) -> None:
         """Release the underlying graph store connection."""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -128,7 +129,6 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             return json.dumps({"error": f"Failed to index {source!r}: {exc}"})
         if not index._graph_store:
             return json.dumps({"error": "No graph data available for this index."})
-        import json
         result = index._graph_store.trace_symbol(symbol)
         return json.dumps(result, ensure_ascii=False)
 
@@ -163,9 +163,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             return f"No chunk found at {file_path}:{line}."
 
         ctx = index.get_context_for_chunk(chunk)
-        symbols = index._graph_store.get_symbols_by_chunk(chunk.location) if index._graph_store else []
+        symbols = index.get_symbols_for_chunk(chunk)
 
-        import json
         return json.dumps({
             "location": chunk.location,
             "symbols": symbols,
