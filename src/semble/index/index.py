@@ -259,6 +259,16 @@ class SembleIndex:
             return []
         return self._graph_store.get_symbols_by_chunk(chunk.location)
 
+    def trace_symbol(self, name: str) -> dict:
+        """Return the call graph neighbourhood for a symbol.
+
+        Delegates to the graph store.  Returns ``{"found": False}`` if
+        no graph data is available or the symbol is unknown.
+        """
+        if not self._graph_store:
+            return {"found": False, "name": name}
+        return self._graph_store.trace_symbol(name)
+
     def close(self) -> None:
         """Release the underlying graph store connection."""
         if self._graph_store is not None:

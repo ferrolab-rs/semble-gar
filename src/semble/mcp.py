@@ -127,9 +127,9 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             index = await cache.get(source)
         except Exception as exc:
             return json.dumps({"error": f"Failed to index {source!r}: {exc}"})
-        if not index._graph_store:
-            return json.dumps({"error": "No graph data available for this index."})
-        result = index._graph_store.trace_symbol(symbol)
+        result = index.trace_symbol(symbol)
+        if not result.get("found"):
+            return json.dumps({"error": f"Symbol {symbol!r} not found in graph."})
         return json.dumps(result, ensure_ascii=False)
 
     @server.tool()
