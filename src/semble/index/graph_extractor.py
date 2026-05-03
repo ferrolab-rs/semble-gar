@@ -43,6 +43,7 @@ class RawFileEdges:
     raw_edges: list[dict] = field(default_factory=list)
     import_map: dict[str, str] = field(default_factory=dict)
     wildcard_modules: list[str] = field(default_factory=list)
+    alias_to_original: dict[str, str] = field(default_factory=dict)
 
 
 def extract_symbols_from_file(
@@ -53,7 +54,7 @@ def extract_symbols_from_file(
     Parses the source once and returns *RawFileEdges* for use in pass 2,
     or *None* if extraction failed (parse error, unsupported language, etc.).
     """
-    symbols, raw_edges, import_map, wildcard_modules = _extract_graph_data(source, language)
+    symbols, raw_edges, import_map, wildcard_modules, alias_map = _extract_graph_data(source, language)
     if symbols is None:
         return None
 
@@ -68,6 +69,7 @@ def extract_symbols_from_file(
         raw_edges=raw_edges,
         import_map=import_map,
         wildcard_modules=wildcard_modules,
+        alias_to_original=alias_map,
     )
 
 
@@ -80,9 +82,9 @@ def extract_edges_from_file(data: RawFileEdges, store: GraphStore) -> None:
     for sym in _get_stored_symbols(store, data.file_path):
         local_symbols.setdefault(sym["name"], []).append(sym["id"])
 
-    # Expand wildcard imports: for each ``from X import *``, add all symbols
-    # from module X to the import_map.
+    # Expand wildcard imports and alias→original chain.
     import_map = dict(data.import_map)
+    alias_to_original = dict(data.alias_to_original)
     for module_source in data.wildcard_modules:
         for name in store.get_module_symbols(module_source):
             if name not in import_map:
@@ -106,13 +108,16 @@ def extract_edges_from_file(data: RawFileEdges, store: GraphStore) -> None:
                 module_sym_id = _ensure_module_symbol(store, data.file_path)
             src_ids = [module_sym_id]
 
+        # Resolve aliases: ``from X import Y as Z`` → call to Z should find Y.
+        resolve_name = alias_to_original.get(target_name, target_name)
+
         # Cross-file fallback: scoped lookup (import-aware) first, then global.
         if not tgt_ids:
-            module_source = import_map.get(target_name)
+            module_source = import_map.get(target_name) or import_map.get(resolve_name)
             if module_source:
-                tgt_ids = store.lookup_symbol_ids_scoped(target_name, module_source)
+                tgt_ids = store.lookup_symbol_ids_scoped(resolve_name, module_source)
             if not tgt_ids:
-                tgt_ids = store.lookup_symbol_ids(target_name)
+                tgt_ids = store.lookup_symbol_ids(resolve_name)
         if not src_ids:
             src_ids = store.lookup_symbol_ids(edge["source"])
 
@@ -134,27 +139,27 @@ def extract_edges_from_file(data: RawFileEdges, store: GraphStore) -> None:
 
 
 def _extract_graph_data(source: str, language: str):
-    """Single tree-sitter parse returning ``(symbols, raw_edges, import_map, wildcard_modules)``.
+    """Single tree-sitter parse returning ``(symbols, raw_edges, import_map, wildcard_modules, alias_map)``.
 
-    Returns ``(None, None, None, None)`` on any failure — the graph stays empty
-    for this file and search falls back to vector-only.
+    Returns ``(None, ...)`` on any failure — the graph stays empty for this file
+    and search falls back to vector-only.
     """
     ts_lang = _TREE_SITTER_LANG.get(language)
     if not ts_lang:
-        return None, None, None, None
+        return None, None, None, None, None
 
     try:
         import tree_sitter_language_pack as tsl  # noqa: PLC0415
     except ImportError:
         logger.debug("tree-sitter-language-pack not available, graph extraction disabled")
-        return None, None, None, None
+        return None, None, None, None, None
 
     try:
         parser = tsl.get_parser(ts_lang)
         tree = parser.parse(source.encode("utf-8"))
     except Exception:
         logger.debug("Tree-sitter parse failed for language %r", ts_lang, exc_info=True)
-        return None, None, None, None
+        return None, None, None, None, None
 
     try:
         symbols = _extract_symbols(tree, source, ts_lang)
@@ -163,12 +168,12 @@ def _extract_graph_data(source: str, language: str):
         symbols = []
 
     try:
-        raw_edges, import_map, wildcard_modules = _extract_edges_and_imports(tree, source, ts_lang)
+        raw_edges, import_map, wildcard_modules, alias_map = _extract_edges_and_imports(tree, source, ts_lang)
     except Exception:
         logger.debug("Edge extraction failed", exc_info=True)
-        raw_edges, import_map, wildcard_modules = [], {}, []
+        raw_edges, import_map, wildcard_modules, alias_map = [], {}, [], {}
 
-    return symbols, raw_edges, import_map, wildcard_modules
+    return symbols, raw_edges, import_map, wildcard_modules, alias_map
 
 
 def _get_stored_symbols(store: GraphStore, file_path: str) -> list[dict]:
@@ -286,15 +291,16 @@ _DEF_NODE_TYPES: frozenset[str] = _FUNC_NODE_TYPES | _CLASS_NODE_TYPES
 _DEF_NAME_FIELDS: tuple[str, ...] = _FUNC_NAME_FIELDS + _CLASS_NAME_FIELDS
 
 
-def _extract_edges_and_imports(tree, source: str, lang: str) -> tuple[list[dict], dict[str, str], list[str]]:
+def _extract_edges_and_imports(tree, source: str, lang: str) -> tuple[list[dict], dict[str, str], list[str], dict[str, str]]:
     edges: list[dict] = []
     import_map: dict[str, str] = {}
     wildcard_modules: list[str] = []
-    _walk_edges(tree.root_node, source, edges, import_map, wildcard_modules)
-    return edges, import_map, wildcard_modules
+    alias_map: dict[str, str] = {}
+    _walk_edges(tree.root_node, source, edges, import_map, wildcard_modules, alias_map)
+    return edges, import_map, wildcard_modules, alias_map
 
 
-def _walk_edges(node, source: str, edges: list[dict], import_map: dict[str, str], wildcard_modules: list[str]) -> None:
+def _walk_edges(node, source: str, edges: list[dict], import_map: dict[str, str], wildcard_modules: list[str], alias_map: dict[str, str]) -> None:
     kind = node.type
 
     if kind in _CALL_NODE_TYPES:
@@ -305,7 +311,7 @@ def _walk_edges(node, source: str, edges: list[dict], import_map: dict[str, str]
                 edges.append({"source": caller, "target": callee, "type": "calls"})
 
     elif kind in _IMPORT_NODE_TYPES:
-        module_path, names, is_wildcard = _extract_import_info(node)
+        module_path, names, is_wildcard, aliases = _extract_import_info(node)
         if is_wildcard and module_path:
             wildcard_modules.append(module_path)
         for n in names:
@@ -313,21 +319,24 @@ def _walk_edges(node, source: str, edges: list[dict], import_map: dict[str, str]
                 edges.append({"source": "*import*", "target": n, "type": "imports"})
                 if module_path:
                     import_map[n] = module_path
+        # Store alias→original mappings for call-edge resolution.
+        alias_map.update(aliases)
 
     for child in node.children:
-        _walk_edges(child, source, edges, import_map, wildcard_modules)
+        _walk_edges(child, source, edges, import_map, wildcard_modules, alias_map)
 
 
-def _extract_import_info(node) -> tuple[str | None, list[str], bool]:
+def _extract_import_info(node) -> tuple[str | None, list[str], bool, dict[str, str]]:
     """Extract module source and imported names from an import statement.
 
-    Returns ``(module_path, [names], is_wildcard)``.  For ``from X import *``,
-    *is_wildcard* is True and *names* is empty.
+    Returns ``(module_path, [names], is_wildcard, aliases)`` where *aliases*
+    maps local alias names to original names (e.g. ``{"lfn": "long_function_name"}``).
     """
     module_path: str | None = None
     names: list[str] = []
     dotted_names: list[str] = []
     is_wildcard = False
+    aliases: dict[str, str] = {}
 
     for child in node.children:
         if child.type == "dotted_name":
@@ -335,14 +344,22 @@ def _extract_import_info(node) -> tuple[str | None, list[str], bool]:
             if text:
                 dotted_names.append(text)
         elif child.type == "aliased_import":
-            # ``from X import Y as Z`` → use Z (the local alias), not Y.
             alias = child.child_by_field_name("alias")
+            original = child.child_by_field_name("name")
+            alias_text: str | None = None
+            original_text: str | None = None
             if alias:
-                text = alias.text.decode("utf-8") if isinstance(alias.text, bytes) else alias.text
-                if text:
-                    names.append(text)
-            else:
-                first = child.child_by_field_name("name") or next((c for c in child.children if c.type == "dotted_name"), None)
+                alias_text = alias.text.decode("utf-8") if isinstance(alias.text, bytes) else alias.text
+                if alias_text:
+                    names.append(alias_text)
+            if original:
+                original_text = original.text.decode("utf-8") if isinstance(original.text, bytes) else original.text
+                if original_text:
+                    names.append(original_text)
+            if alias_text and original_text:
+                aliases[alias_text] = original_text
+            elif not alias and not original:
+                first = next((c for c in child.children if c.type == "dotted_name"), None)
                 if first:
                     text = first.text.decode("utf-8") if isinstance(first.text, bytes) else first.text
                     if text:
@@ -357,7 +374,7 @@ def _extract_import_info(node) -> tuple[str | None, list[str], bool]:
     else:
         names.extend(dotted_names)
 
-    return module_path, names, is_wildcard
+    return module_path, names, is_wildcard, aliases
 
 
 _BUILTINS: frozenset[str] = frozenset({
