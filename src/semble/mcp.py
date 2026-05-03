@@ -110,6 +110,29 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         return _format_results_json(results, contexts)
 
     @server.tool()
+    async def trace_symbol(
+        symbol: Annotated[str, Field(description="Function or class name to trace (e.g. 'resolve_alpha').")],
+        repo: Annotated[str | None, Field(description=_REPO_DESCRIPTION)] = None,
+    ) -> str:
+        """Trace a symbol through the code graph: who calls it, what it calls, who imports it.
+
+        Returns a compact subgraph with centrality scores. Use after search
+        to understand how a function fits into the codebase without reading files.
+        """
+        source = repo or default_source
+        if not source:
+            return json.dumps({"error": "No repo specified and no default index."})
+        try:
+            index = await cache.get(source)
+        except Exception as exc:
+            return json.dumps({"error": f"Failed to index {source!r}: {exc}"})
+        if not index._graph_store:
+            return json.dumps({"error": "No graph data available for this index."})
+        import json
+        result = index._graph_store.trace_symbol(symbol)
+        return json.dumps(result, ensure_ascii=False)
+
+    @server.tool()
     async def explore_graph(
         file_path: Annotated[
             str,

@@ -265,6 +265,88 @@ class GraphStore:
             self._import_map_cache = mapping
         return self._import_map_cache
 
+    def trace_symbol(self, name: str) -> dict:
+        """Return the immediate neighbourhood of all symbols matching *name*.
+
+        Returns a compact dict with callers, callees, centrality, and import
+        relationships — enough context for an agent to decide what to explore
+        next without reading files.
+        """
+        symbol_rows = self.conn.execute(
+            "SELECT id, name, type, file, chunk_id FROM symbols WHERE name = ? AND name NOT IN ('*import*', '*module*')",
+            (name,),
+        ).fetchall()
+        if not symbol_rows:
+            return {"found": False, "name": name}
+
+        results: list[dict] = []
+        all_chunk_ids: set[str] = set()
+
+        for sid, sname, stype, sfile, schunk_id in symbol_rows:
+            chunk_ids_for_cent = list({schunk_id} | set(self._get_related_chunks(sid)))
+            cent_map = self.get_graph_centrality(chunk_ids_for_cent)
+            centrality = cent_map.get(schunk_id, 0.0)
+
+            callers = self._get_edge_endpoints(sid, "incoming")
+            callees = self._get_edge_endpoints(sid, "outgoing")
+            imported_by = self._get_importers(sfile)
+            all_chunk_ids.update(c["chunk_id"] for c in callers + callees if c.get("chunk_id"))
+
+            results.append({
+                "symbol": sname,
+                "type": stype,
+                "file": sfile,
+                "chunk_id": schunk_id,
+                "centrality": round(centrality, 3),
+                "callers": callers,
+                "callees": callees,
+                "imported_by": imported_by,
+            })
+
+        return {"found": True, "name": name, "matches": len(results), "results": results}
+
+    def _get_edge_endpoints(self, symbol_id: int, direction: str) -> list[dict]:
+        """Return callers (incoming) or callees (outgoing) for a symbol."""
+        if direction == "incoming":
+            rows = self.conn.execute(
+                "SELECT s.id, s.name, s.type, s.file, s.chunk_id, e.type "
+                "FROM edges e JOIN symbols s ON s.id = e.source_id "
+                "WHERE e.target_id = ? AND e.type = 'calls'",
+                (symbol_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT s.id, s.name, s.type, s.file, s.chunk_id, e.type "
+                "FROM edges e JOIN symbols s ON s.id = e.target_id "
+                "WHERE e.source_id = ? AND e.type = 'calls'",
+                (symbol_id,),
+            ).fetchall()
+        return [
+            {"symbol": r[1], "type": r[2], "file": r[3], "chunk_id": r[4], "relation": r[5]}
+            for r in rows
+        ]
+
+    def _get_importers(self, file_path: str) -> list[str]:
+        """Return chunk_ids of files that import symbols from *file_path*."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.chunk_id FROM edges e "
+            "JOIN symbols s ON s.id = e.source_id "
+            "WHERE s.name = '*import*' AND e.target_id IN "
+            "(SELECT id FROM symbols WHERE file = ? AND name NOT IN ('*import*', '*module*'))",
+            (file_path,),
+        ).fetchall()
+        return [r[0] for r in rows if not r[0].endswith(":0-0")]
+
+    def _get_related_chunks(self, symbol_id: int) -> list[str]:
+        """Return chunk_ids of all symbols connected to *symbol_id*."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.chunk_id FROM edges e "
+            "JOIN symbols s ON s.id IN (e.source_id, e.target_id) "
+            "WHERE (e.source_id = ? OR e.target_id = ?) AND s.name NOT IN ('*import*', '*module*')",
+            (symbol_id, symbol_id),
+        ).fetchall()
+        return [r[0] for r in rows if not r[0].endswith(":0-0")]
+
     def close(self) -> None:
         try:
             self.conn.close()
