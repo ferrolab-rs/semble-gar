@@ -23,9 +23,10 @@ def chunk_source(source: str, file_path: str, language: str | None) -> list[Chun
     """Chunk pre-read source text."""
     if not source.strip():
         return []
+    total_lines = source.count("\n") + 1
     if language:
-        return _chunk_with_chonkie(source, file_path, language)
-    return chunk_lines(source, file_path, language)
+        return _chunk_with_chonkie(source, file_path, language, total_lines)
+    return chunk_lines(source, file_path, language, total_lines=total_lines)
 
 
 def chunk_lines(
@@ -34,12 +35,14 @@ def chunk_lines(
     language: str | None = None,
     max_lines: int = 50,
     overlap_lines: int = 5,
+    total_lines: int = 0,
 ) -> list[Chunk]:
     """Split source by line count with overlap."""
     lines = source.splitlines(keepends=True)
     if not lines:
         return []
 
+    tl = total_lines or len(lines)
     chunks: list[Chunk] = []
     start = 0
     while start < len(lines):
@@ -53,6 +56,7 @@ def chunk_lines(
                     start_line=start + 1,
                     end_line=end,
                     language=language,
+                    file_total_lines=tl,
                 )
             )
         start = end - overlap_lines if end < len(lines) else end
@@ -60,24 +64,24 @@ def chunk_lines(
     return chunks
 
 
-def _chunk_with_chonkie(source: str, file_path: str, language: str) -> list[Chunk]:
+def _chunk_with_chonkie(source: str, file_path: str, language: str, total_lines: int = 0) -> list[Chunk]:
     """Chunk source with Chonkie and fall back to line chunks on failure."""
+    tl = total_lines or source.count("\n") + 1
     try:
         code_chunker = CodeChunker(language=language, chunk_size=1500)
         raw_chunks = code_chunker.chunk(source)
     except Exception:
         logger.debug("Chonkie failed for language %r, falling back to line chunking", language, exc_info=True)
-        return chunk_lines(source, file_path, language)
+        return chunk_lines(source, file_path, language, total_lines=tl)
 
     if not raw_chunks:
-        return chunk_lines(source, file_path, language)
+        return chunk_lines(source, file_path, language, total_lines=tl)
 
     chunks: list[Chunk] = []
     for raw_chunk in raw_chunks:
         text = raw_chunk.text
         if not text.strip():
             continue
-        # Clamp to start_index so zero-length chunks don't produce an off-by-one.
         end_index = max(raw_chunk.end_index - 1, raw_chunk.start_index)
         chunks.append(
             Chunk(
@@ -86,6 +90,7 @@ def _chunk_with_chonkie(source: str, file_path: str, language: str) -> list[Chun
                 start_line=source[: raw_chunk.start_index].count("\n") + 1,
                 end_line=source[:end_index].count("\n") + 1,
                 language=language,
+                file_total_lines=tl,
             )
         )
-    return chunks if chunks else chunk_lines(source, file_path, language)
+    return chunks if chunks else chunk_lines(source, file_path, language, total_lines=tl)

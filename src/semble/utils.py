@@ -54,11 +54,10 @@ def _format_results_json(
     output: list[dict] = []
     for r in results:
         ctx = contexts.get(r.chunk.location, GraphContext())
-        file_lines = r.chunk.content.count("\n") + 1
         output.append({
             "file": r.chunk.file_path,
             "line": f"{r.chunk.start_line}-{r.chunk.end_line}",
-            "file_lines": file_lines,
+            "file_total_lines": r.chunk.file_total_lines,
             "code": r.chunk.content,
             "score": round(r.score, 4),
             "source": r.source.value,

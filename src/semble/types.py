@@ -42,6 +42,7 @@ class Chunk:
     start_line: int
     end_line: int
     language: str | None = None
+    file_total_lines: int = 0
 
     @property
     def location(self) -> str:
