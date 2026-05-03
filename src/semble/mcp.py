@@ -41,6 +41,14 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             Field(description="Search mode. 'hybrid' is best for most queries."),
         ] = "hybrid",
         top_k: Annotated[int, Field(description="Number of results to return.", ge=1)] = 5,
+        filter_languages: Annotated[
+            list[str] | None,
+            Field(description="Restrict results to these language codes (e.g. ['python', 'rust'])."),
+        ] = None,
+        filter_paths: Annotated[
+            list[str] | None,
+            Field(description="Restrict results to these repo-relative file paths."),
+        ] = None,
     ) -> str:
         """Search a codebase with a natural-language or code query.
 
@@ -57,7 +65,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             index = await cache.get(source)
         except Exception as exc:
             return f"Failed to index {source!r}: {exc}"
-        results = index.search(query, top_k=top_k, mode=mode)
+        results = index.search(query, top_k=top_k, mode=mode,
+                               filter_languages=filter_languages, filter_paths=filter_paths)
         if not results:
             return "No results found."
         contexts = index.get_context_for_results(results)
@@ -99,6 +108,47 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             return f"No related chunks found for {file_path}:{line}."
         contexts = index.get_context_for_results(results)
         return _format_results_json(results, contexts)
+
+    @server.tool()
+    async def explore_graph(
+        file_path: Annotated[
+            str,
+            Field(description="File path as returned by a search result."),
+        ],
+        line: Annotated[int, Field(description="Line number within the file (1-indexed).")],
+        repo: Annotated[str | None, Field(description=_REPO_DESCRIPTION)] = None,
+    ) -> str:
+        """Explore the code relationship graph for a specific location.
+
+        Returns the call chain: what calls this code (called_by) and what it
+        depends on (depends_on), plus the symbols defined at this location.
+        Useful after `search` to understand how a chunk fits into the codebase.
+        """
+        source = repo or default_source
+        if not source:
+            return (
+                "No repo specified and no default index. "
+                "Pass a git URL (https://github.com/...) or local path as `repo`."
+            )
+        try:
+            index = await cache.get(source)
+        except Exception as exc:
+            return f"Failed to index {source!r}: {exc}"
+
+        chunk = _resolve_chunk(index.chunks, file_path, line)
+        if chunk is None:
+            return f"No chunk found at {file_path}:{line}."
+
+        ctx = index.get_context_for_chunk(chunk)
+        symbols = index._graph_store.get_symbols_by_chunk(chunk.location) if index._graph_store else []
+
+        import json
+        return json.dumps({
+            "location": chunk.location,
+            "symbols": symbols,
+            "called_by": ctx.called_by,
+            "depends_on": ctx.depends_on,
+        }, ensure_ascii=False)
 
     return server
 
