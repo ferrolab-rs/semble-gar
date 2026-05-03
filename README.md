@@ -1,17 +1,17 @@
 
 <h2 align="center">
   <img width="30%" alt="semble logo" src="https://raw.githubusercontent.com/MinishLab/semble/main/assets/images/semble_logo.png"><br/>
-  Fast and Accurate Code Search for Agents<br/>
-  <sub>Uses ~98% fewer tokens than grep+read</sub>
+  Fast and Accurate Code Search with Graph-Augmented Retrieval for Agents<br/>
+  <sub>Hybrid search + relational code graph. Uses ~98% fewer tokens than grep+read.</sub>
 </h2>
 
 <div align="center">
   <h2>
     <a href="https://pypi.org/project/semble/"><img src="https://img.shields.io/pypi/v/semble?color=%23007ec6&label=pypi%20package" alt="Package version"></a>
-    <a href="https://app.codecov.io/gh/MinishLab/semble">
-      <img src="https://codecov.io/gh/MinishLab/semble/graph/badge.svg?token=SZKRFKPPCG" alt="Codecov">
+    <a href="https://app.codecov.io/gh/ferrolab-rs/semble-gar">
+      <img src="https://codecov.io/gh/ferrolab-rs/semble-gar/graph/badge.svg?token=SZKRFKPPCG" alt="Codecov">
     </a>
-    <a href="https://github.com/MinishLab/semble/blob/main/LICENSE">
+    <a href="https://github.com/ferrolab-rs/semble-gar/blob/main/LICENSE">
       <img src="https://img.shields.io/badge/license-MIT-green" alt="License - MIT">
     </a>
   </h2>
@@ -25,7 +25,7 @@
 
 </div>
 
-Semble is a code search library built for agents. It returns the exact code snippets they need instantly, using ~98% fewer tokens than grep+read and cutting latency on every step. Indexing and searching a full codebase end-to-end takes under a second, with ~200x faster indexing and ~10x faster queries than a code-specialized transformer, at 99% of its retrieval quality (see [benchmarks](#benchmarks)). Everything runs on CPU with no API keys, GPU, or external services. Run it as an [MCP server](#mcp-server) and any agent (Claude Code, Cursor, Codex, OpenCode, etc.) gets instant access to any repo, cloned and indexed on demand.
+Semble is a code search library built for agents. It combines hybrid search (semantic + BM25) with a **Graph-Augmented Retrieval** layer that extracts the code's relational structure — who calls what, which files import which symbols — and uses it to boost structurally important code and enrich results with dependency context. It returns the exact code snippets agents need instantly, using ~98% fewer tokens than grep+read. Indexing and searching a full codebase end-to-end takes under a second, with ~200x faster indexing and ~10x faster queries than a code-specialized transformer, at 99% of its retrieval quality (see [benchmarks](#benchmarks)). Everything runs on CPU with no API keys, GPU, or external services. Run it as an [MCP server](#mcp-server) and any agent (Claude Code, Cursor, Codex, OpenCode, etc.) gets instant access to any repo, cloned and indexed on demand.
 
 ## Quickstart
 
@@ -55,12 +55,18 @@ result.chunk.file_path   # "model2vec/model.py"
 result.chunk.start_line  # 127
 result.chunk.end_line    # 150
 result.chunk.content     # "def save_pretrained(self, path: PathLike, ..."
+
+# Get relational context: who calls this code, what it depends on
+ctx = index.get_context_for_chunk(result.chunk)
+ctx.called_by   # ["model2vec/hub.py:10-25", "model2vec/cli.py:40-55"]
+ctx.depends_on  # ["model2vec/persistence.py:100-130"]
 ```
 
 ## Main Features
 
 - **Fast**: indexes a repo in ~250 ms and answers queries in ~1.5 ms, all on CPU.
 - **Accurate**: NDCG@10 of 0.854 on our [benchmarks](#benchmarks), on par with code-specialized transformer models, at a fraction of the size and cost.
+- **Graph-Augmented Retrieval**: extracts the code's call graph and import tree via tree-sitter, stores it in a zero-dependency SQLite graph, and boosts structurally important chunks while enriching results with `called_by`/`depends_on` context.
 - **Token-efficient**: returns only the relevant chunks, using ~98% fewer tokens than grep+read.
 - **Zero setup**: runs on CPU with no API keys, GPU, or external services required.
 - **MCP server**: drop-in tool for Claude Code, Cursor, Codex, OpenCode, and any other MCP-compatible agent.
@@ -117,8 +123,24 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 
 | Tool | Description |
 |------|-------------|
-| `search` | Search a codebase with a natural-language or code query. Pass `repo` as a git URL or local path. |
-| `find_related` | Given a file path and line number, return chunks semantically similar to the code at that location. |
+| `search` | Search a codebase with a natural-language or code query. Pass `repo` as a git URL or local path. Results include relational context (`called_by`, `depends_on`). |
+| `find_related` | Given a file path and line number, return chunks semantically similar to the code at that location, with relational metadata. |
+
+Each result is returned as JSON with the following structure:
+
+```json
+{
+  "file": "model2vec/model.py",
+  "line": "127-150",
+  "code": "def save_pretrained(self, path: PathLike, ...",
+  "score": 0.95,
+  "source": "hybrid",
+  "context": {
+    "called_by": ["model2vec/hub.py:10-25"],
+    "depends_on": ["model2vec/persistence.py:100-130"]
+  }
+}
+```
 
 ### Sub-agent support
 
@@ -189,13 +211,16 @@ If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]" semble` in its plac
 
 ## How it works
 
-Semble splits each file into code-aware chunks using [Chonkie](https://github.com/chonkie-inc/chonkie), then scores every query against the chunks with two complementary retrievers: static [Model2Vec](https://github.com/MinishLab/model2vec) embeddings using the code-specialized [potion-code-16M](https://huggingface.co/minishlab/potion-code-16M) model for semantic similarity, and [BM25](https://github.com/xhluca/bm25s) for lexical matches on identifiers and API names. The two score lists are fused with Reciprocal Rank Fusion (RRF).
+Semble splits each file into code-aware chunks using [Chonkie](https://github.com/chonkie-inc/chonkie), then builds a **code relationship graph** powered by tree-sitter and SQLite. The graph captures function/class definitions, call edges, and import dependencies across files — without adding any heavy dependencies (sqlite3 is stdlib, tree-sitter is a transitive dependency of Chonkie).
 
-After fusing, results are reranked with a set of code-aware signals:
+At query time, Semble scores every query against the chunks with two complementary retrievers: static [Model2Vec](https://github.com/MinishLab/model2vec) embeddings using the code-specialized [potion-code-16M](https://huggingface.co/minishlab/potion-code-16M) model for semantic similarity, and [BM25](https://github.com/xhluca/bm25s) for lexical matches on identifiers and API names. The two score lists are fused with Reciprocal Rank Fusion (RRF).
+
+After fusing, chunks are boosted by their **graph centrality** (degree in the call+import graph), so well-connected "hub" functions rank higher. Results are then enriched with relational context (`called_by` / `depends_on`) so agents understand not just *what* matches, but *how* the code fits into the codebase structure. Finally, results are reranked with a set of code-aware signals:
 
 <details>
 <summary><b>Ranking signals</b></summary>
 
+- **Graph centrality boost.** Chunks with high degree in the code relationship graph (many callers, many dependencies) are boosted — structurally important "hub" functions surface above isolated utilities.
 - **Adaptive weighting.** Symbol-like queries (`Foo::bar`, `_private`, `getUserById`) get more lexical weight, while natural-language queries stay balanced between semantic and lexical retrievers.
 - **Definition boosts.** A chunk that defines the queried symbol (a `class`, `def`, `func`, etc.) is ranked above chunks that merely reference it.
 - **Identifier stems.** Query tokens are stemmed and matched against identifier stems in a chunk, giving an additional weight to chunks that contain them. For example, querying `parse config` boosts chunks containing `parseConfig`, `ConfigParser`, or `config_parser`.
@@ -239,7 +264,7 @@ MIT
 
 ## Citing
 
-If you use Semble in your research, please cite the following:
+If you use Semble-GAR in your research, please cite the original Semble paper:
 
 ```bibtex
 @software{minishlab2026semble,

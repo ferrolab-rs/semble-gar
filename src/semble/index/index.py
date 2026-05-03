@@ -11,12 +11,13 @@ from bm25s import BM25
 
 from semble.index.create import create_index_from_path
 from semble.index.dense import SelectableBasicBackend, load_model
+from semble.index.graph_store import GraphStore
 from semble.search import search_bm25, search_hybrid, search_semantic
-from semble.types import Chunk, Encoder, IndexStats, SearchMode, SearchResult
+from semble.types import Chunk, Encoder, GraphContext, IndexStats, SearchMode, SearchResult
 
 
 class SembleIndex:
-    """Fast local code index with hybrid search."""
+    """Fast local code index with hybrid search and graph-augmented retrieval."""
 
     def __init__(
         self,
@@ -24,6 +25,7 @@ class SembleIndex:
         bm25_index: BM25,
         semantic_index: SelectableBasicBackend,
         chunks: list[Chunk],
+        graph_store: GraphStore | None = None,
     ) -> None:
         """Internal constructor — use :meth:`from_path` or :meth:`from_git`.
 
@@ -31,11 +33,13 @@ class SembleIndex:
         :param bm25_index: The bm25 index.
         :param semantic_index: The semantic index.
         :param chunks: The found chunks.
+        :param graph_store: Optional graph store for relational context in search results.
         """
         self.model: Encoder = model
         self.chunks: list[Chunk] = chunks
         self._bm25_index: BM25 = bm25_index
         self._semantic_index: SelectableBasicBackend = semantic_index
+        self._graph_store: GraphStore | None = graph_store
         self._file_mapping, self._language_mapping = self._populate_mapping()
 
     def _populate_mapping(self) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
@@ -91,7 +95,7 @@ class SembleIndex:
         if not path.is_dir():
             raise NotADirectoryError(f"Path is not a directory: {path}")
         path = path.resolve()
-        bm25, vicinity, chunks = create_index_from_path(
+        bm25, vicinity, chunks, graph_store = create_index_from_path(
             path,
             model=model,
             extensions=extensions,
@@ -100,7 +104,7 @@ class SembleIndex:
             display_root=path,
         )
 
-        index = SembleIndex(model, bm25, vicinity, chunks)
+        index = SembleIndex(model, bm25, vicinity, chunks, graph_store)
 
         return index
 
@@ -141,7 +145,7 @@ class SembleIndex:
                 raise RuntimeError(f"git clone failed for {url!r}:\n{result.stderr.strip()}")
             model = model or load_model()
             resolved_path = Path(tmp_dir).resolve()
-            bm25, vicinity, chunks = create_index_from_path(
+            bm25, vicinity, chunks, graph_store = create_index_from_path(
                 resolved_path,
                 model=model,
                 extensions=extensions,
@@ -150,7 +154,7 @@ class SembleIndex:
                 display_root=resolved_path,
             )
 
-            index = SembleIndex(model, bm25, vicinity, chunks)
+            index = SembleIndex(model, bm25, vicinity, chunks, graph_store)
 
             return index
 
@@ -214,6 +218,44 @@ class SembleIndex:
             return search_semantic(query, self.model, semantic_index, self.chunks, top_k, selector=selector)
         if mode == SearchMode.HYBRID:
             return search_hybrid(
-                query, self.model, semantic_index, bm25_index, self.chunks, top_k, alpha=alpha, selector=selector
+                query, self.model, semantic_index, bm25_index, self.chunks, top_k,
+                alpha=alpha, selector=selector, graph_store=self._graph_store,
             )
         raise ValueError(f"Unknown search mode: {mode!r}")
+
+    def get_context_for_results(self, results: list[SearchResult]) -> dict[str, GraphContext]:
+        """Return relational context for each search result.
+
+        :param results: Search results to enrich with graph context.
+        :return: Mapping of chunk_id to GraphContext.
+        """
+        if not self._graph_store or not results:
+            return {}
+        chunk_ids = [r.chunk.location for r in results]
+        try:
+            return self._graph_store.get_relational_context(chunk_ids)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("Graph context lookup failed", exc_info=True)
+            return {}
+
+    def get_context_for_chunk(self, chunk: Chunk) -> GraphContext:
+        """Return relational context for a single chunk."""
+        if not self._graph_store:
+            return GraphContext()
+        try:
+            contexts = self._graph_store.get_relational_context([chunk.location])
+            return contexts.get(chunk.location, GraphContext())
+        except Exception:
+            return GraphContext()
+
+    def close(self) -> None:
+        """Release the underlying graph store connection."""
+        if self._graph_store is not None:
+            self._graph_store.close()
+
+    def __enter__(self) -> SembleIndex:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()

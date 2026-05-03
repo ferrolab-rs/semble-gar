@@ -6,6 +6,14 @@ from typing import Protocol, TypeAlias
 import numpy as np
 import numpy.typing as npt
 
+
+@dataclass(frozen=True, slots=True)
+class GraphContext:
+    """Relational metadata for a chunk from the code graph."""
+
+    called_by: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
+
 EmbeddingMatrix: TypeAlias = npt.NDArray[np.float32]
 
 

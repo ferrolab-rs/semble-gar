@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "semble"
-description = "Fast and Accurate Code Search for Agents"
-authors = [{name = "Thomas van Dongen", email = "thomas123@live.nl"}, { name = "Stéphan Tulkens", email = "stephantul@gmail.com"}]
+name = "semble-gar"
+description = "Fast and accurate code search with Graph-Augmented Retrieval for agents. Fork of MinishLab/semble with SQLite + tree-sitter relational graph layer."
+authors = [{name = "ferrolab-rs"}, {name = "Thomas van Dongen", email = "thomas123@live.nl"}, { name = "Stéphan Tulkens", email = "stephantul@gmail.com"}]
 readme = { file = "README.md", content-type = "text/markdown" }
 dynamic = ["version"]
 license = { file = "LICENSE" }
@@ -56,9 +56,9 @@ dev = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/MinishLab/semble"
-"Bug Reports" = "https://github.com/MinishLab/semble/issues"
-"Source" = "https://github.com/MinishLab/semble"
+"Homepage" = "https://github.com/ferrolab-rs/semble-gar"
+"Bug Reports" = "https://github.com/ferrolab-rs/semble-gar/issues"
+"Source" = "https://github.com/ferrolab-rs/semble-gar"
 
 [project.scripts]
 semble = "semble.cli:main"

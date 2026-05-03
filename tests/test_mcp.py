@@ -28,6 +28,7 @@ async def _call_tool(
     """Patch SembleIndex.from_path with a fake index and invoke the tool, returning the text."""
     fake_index = MagicMock()
     getattr(fake_index, index_method).return_value = index_return
+    fake_index.get_context_for_results.return_value = {}
     if index_chunks is not None:
         fake_index.chunks = index_chunks
     with patch("semble.mcp.SembleIndex.from_path", return_value=fake_index):
@@ -185,7 +186,7 @@ async def test_tool_index_failure(cache: _IndexCache, tool: str, args: dict[str,
             "search",
             [SearchResult(chunk=make_chunk("def bar(): pass", "src/bar.py"), score=0.9, source=SearchMode.HYBRID)],
             None,
-            ["bar", "0.900"],
+            ['"file": "src/bar.py"', '"score": 0.9', '"called_by"', '"depends_on"'],
             id="search_with_results",
         ),
         pytest.param(
@@ -203,7 +204,7 @@ async def test_tool_index_failure(cache: _IndexCache, tool: str, args: dict[str,
             "find_related",
             [SearchResult(chunk=make_chunk("class Foo: pass", "src/foo.py"), score=0.8, source=SearchMode.SEMANTIC)],
             [make_chunk("class Foo: pass", "src/foo.py")],
-            ["src/foo.py:1", "0.800"],
+            ['"file": "src/foo.py"', '"score": 0.8', '"called_by"'],
             id="find_related_with_results",
         ),
         pytest.param(

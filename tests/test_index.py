@@ -22,7 +22,7 @@ def test_index_markdown_inclusion(
     mock_model: Encoder, tmp_project: Path, include_text_files: bool, md_in_results: bool
 ) -> None:
     """Markdown files are excluded by default and included when include_text_files=True."""
-    _, _, chunks = create_index_from_path(tmp_project, mock_model, include_text_files=include_text_files)
+    _, _, chunks, _ = create_index_from_path(tmp_project, mock_model, include_text_files=include_text_files)
     has_md = ".md" in {Path(c.file_path).suffix for c in chunks}
     assert has_md is md_in_results
 

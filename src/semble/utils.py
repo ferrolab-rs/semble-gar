@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 
-from semble.types import Chunk, SearchResult
+from semble.types import Chunk, GraphContext, SearchResult
 
 _GIT_URL_SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://", "file://")
 _SCP_GIT_URL_RE = re.compile(r"^[\w.-]+@[\w.-]+:(?!/)")
@@ -39,3 +40,31 @@ def _format_results(header: str, results: list[SearchResult]) -> str:
         lines.append("```")
         lines.append("")
     return "\n".join(lines)
+
+
+def _format_results_json(
+    results: list[SearchResult],
+    contexts: dict[str, GraphContext] | None = None,
+) -> str:
+    """Render SearchResult objects as JSON with relational metadata.
+
+    Format: {"file": "...", "line": "...", "code": "...", "context": {"called_by": [...], "depends_on": [...]}}
+    """
+    contexts = contexts or {}
+    output: list[dict] = []
+    for r in results:
+        ctx = contexts.get(r.chunk.location, GraphContext())
+        output.append({
+            "file": r.chunk.file_path,
+            "line": f"{r.chunk.start_line}-{r.chunk.end_line}",
+            "code": r.chunk.content,
+            "score": round(r.score, 4),
+            "source": r.source.value,
+            "context": {
+                "called_by": ctx.called_by,
+                "depends_on": ctx.depends_on,
+            },
+        })
+    return json.dumps(output, ensure_ascii=False)
+
+

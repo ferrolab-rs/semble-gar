@@ -1,14 +1,22 @@
+from __future__ import annotations
+
+import logging
+
 import bm25s
 import numpy as np
 import numpy.typing as npt
 
 from semble.index.dense import SelectableBasicBackend
+from semble.index.graph_store import GraphStore
 from semble.index.sparse import selector_to_mask
 from semble.ranking import apply_query_boost, boost_multi_chunk_files, rerank_topk, resolve_alpha
 from semble.tokens import tokenize
 from semble.types import Chunk, Encoder, SearchMode, SearchResult
 
+logger = logging.getLogger(__name__)
+
 _RRF_K = 60
+_GRAPH_BOOST = 0.4
 
 
 def _rrf_scores(scores: dict[Chunk, float]) -> dict[Chunk, float]:
@@ -67,6 +75,28 @@ def search_bm25(
     ]
 
 
+def _apply_graph_boost(
+    combined_scores: dict[Chunk, float],
+    graph_store: GraphStore,
+) -> dict[Chunk, float]:
+    """Boost chunks with high graph centrality.
+
+    A chunk that is well-connected in the code graph (called by many, depends
+    on many) gets a score uplift, favouring structurally important code.
+    """
+    chunk_ids = [c.location for c in combined_scores]
+    try:
+        centrality = graph_store.get_graph_centrality(chunk_ids)
+    except Exception:
+        logger.warning("Graph centrality lookup failed, search continues without graph boost", exc_info=True)
+        return combined_scores
+
+    return {
+        chunk: score * (1.0 + _GRAPH_BOOST * centrality.get(chunk.location, 0.0))
+        for chunk, score in combined_scores.items()
+    }
+
+
 def search_hybrid(
     query: str,
     model: Encoder,
@@ -76,6 +106,7 @@ def search_hybrid(
     top_k: int,
     alpha: float | None = None,
     selector: npt.NDArray[np.int_] | None = None,
+    graph_store: GraphStore | None = None,
 ) -> list[SearchResult]:
     """Hybrid search: alpha-weighted combination of semantic and BM25 scores.
 
@@ -90,6 +121,7 @@ def search_hybrid(
     :param top_k: Number of results to return.
     :param alpha: Weight for semantic score (1-alpha goes to BM25). None = auto-detect based on query type.
     :param selector: Optional array of chunk indices to filter results by.
+    :param graph_store: Optional graph store for graph-augmented retrieval.
     :return: List of search results sorted by combined score descending.
     """
     alpha_weight = resolve_alpha(query, alpha)
@@ -117,6 +149,9 @@ def search_hybrid(
     boost_multi_chunk_files(combined_scores)
     # Boost queries with specific identifiers in them.
     combined_scores = apply_query_boost(combined_scores, query, chunks)
+    # Boost chunks with high graph centrality.
+    if graph_store is not None:
+        combined_scores = _apply_graph_boost(combined_scores, graph_store)
     # Rerank the top-k results by applying path-based penalties.
     ranked = rerank_topk(combined_scores, top_k, penalise_paths=alpha_weight < 1.0)
     return [SearchResult(chunk=chunk, score=score, source=SearchMode.HYBRID) for chunk, score in ranked]

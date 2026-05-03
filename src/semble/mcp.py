@@ -10,7 +10,7 @@ from pydantic import Field
 from semble.index import SembleIndex
 from semble.index.dense import load_model
 from semble.types import Encoder
-from semble.utils import _format_results, _is_git_url, _resolve_chunk
+from semble.utils import _format_results, _format_results_json, _is_git_url, _resolve_chunk
 
 _REPO_DESCRIPTION = (
     "Git URL (e.g. https://github.com/org/repo) or local path to index and search. "
@@ -60,7 +60,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         results = index.search(query, top_k=top_k, mode=mode)
         if not results:
             return "No results found."
-        return _format_results(f"Search results for: {query!r} (mode={mode})", results)
+        contexts = index.get_context_for_results(results)
+        return _format_results_json(results, contexts)
 
     @server.tool()
     async def find_related(
@@ -96,7 +97,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         results = index.find_related(chunk, top_k=top_k)
         if not results:
             return f"No related chunks found for {file_path}:{line}."
-        return _format_results(f"Chunks related to {file_path}:{line}", results)
+        contexts = index.get_context_for_results(results)
+        return _format_results_json(results, contexts)
 
     return server
 
