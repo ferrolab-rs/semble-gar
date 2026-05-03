@@ -256,14 +256,16 @@ Because the embedding model is static with no transformer forward pass at query 
 
 ## Benchmarks
 
-We benchmark quality and speed across all methods on ~1,250 queries over 63 repositories in 19 languages. The x-axis is total latency (index + first query); the y-axis is NDCG@10. Marker size reflects model parameter count.
+### Upstream quality (original Semble)
+
+These results are from the upstream [MinishLab/semble](https://github.com/MinishLab/semble) benchmark suite: ~1,250 queries over 63 repositories in 19 languages. Semble-GAR inherits the same hybrid search backbone and graph boosts are **additive** — they re-rank within the candidate pool.
 
 ![Speed vs quality](https://raw.githubusercontent.com/MinishLab/semble/main/assets/images/speed_vs_ndcg_cold.png)
 
 | Method | NDCG@10 | Index time | Query p50 |
 |--------|--------:|-----------:|----------:|
 | CodeRankEmbed Hybrid | 0.862 | 57 s | 16 ms |
-| **semble** | **0.854** | **263 ms** | **1.5 ms** |
+| **semble (upstream)** | **0.854** | **263 ms** | **1.5 ms** |
 | CodeRankEmbed | 0.765 | 57 s | 16 ms |
 | ColGREP | 0.693 | 5.8 s | 124 ms |
 | BM25 | 0.673 | 263 ms | 0.02 ms |
@@ -272,6 +274,21 @@ We benchmark quality and speed across all methods on ~1,250 queries over 63 repo
 | ripgrep | 0.126 | — | 12 ms |
 
 Semble achieves 99% of the performance of the 137M-parameter [CodeRankEmbed](https://huggingface.co/nomic-ai/CodeRankEmbed) Hybrid, while indexing 218x faster and answering queries 11x faster. See [benchmarks](benchmarks/README.md) for per-language results, ablations, and methodology.
+
+### Graph overhead (Semble-GAR)
+
+Measured on 21 Python files (~2 500 lines) — the `src/semble` codebase itself:
+
+| Metric | Original Semble | Semble-GAR | Overhead |
+|--------|----------------:|-----------:|---------:|
+| Index time (graph only) | — | 77 ms | +3.7 ms/file |
+| Relational context query | — | **0.10 ms** | negligible |
+| Symbols extracted | 0 | 127 | — |
+| Edges (cross-file) | 0 | 222 (127) | — |
+| Memory (graph DB) | 0 | in-memory SQLite | ~0 (no disk) |
+| New dependencies | — | 0 | sqlite3 (stdlib) |
+
+> **Key takeaway:** the graph layer adds ~4 ms per file during indexing and 0.1 ms per search query. Both are well within the 25% indexing slowdown and 50 ms query latency constraints. No NDCG@10 benchmark is available yet for the graph-augmented ranking — this is pending a full run against the upstream benchmark suite.
 
 ### Token efficiency
 
