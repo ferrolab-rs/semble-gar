@@ -156,6 +156,7 @@ Each result is returned as JSON with the following structure:
 {
   "file": "model2vec/model.py",
   "line": "127-150",
+  "file_lines": 385,
   "code": "def save_pretrained(self, path: PathLike, ...",
   "score": 0.95,
   "source": "hybrid",
