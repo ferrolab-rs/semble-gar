@@ -48,7 +48,8 @@
 ```bash
 git clone https://github.com/ferrolab-rs/semble-gar.git
 cd semble-gar
-pip install -e ".[dev]"   # Install in editable mode
+pip install -e "."        # Base install (CPU-only, zero extra deps)
+pip install -e ".[mcp]"   # or with MCP server support
 ```
 
 ```python
@@ -173,8 +174,6 @@ Claude Code and Codex CLI lazy-load MCP tool schemas, so sub-agents cannot call 
 
 ```bash
 semble init
-# or, if semble is not on $PATH:
-uvx --from "semble[mcp]" semble init
 ```
 
 This writes [`.claude/agents/semble-search.md`](src/semble/agents/semble-search.md).
@@ -199,8 +198,6 @@ semble find-related src/auth.py 42 ./my-project
 ​```
 
 `path` defaults to the current directory when omitted; git URLs are accepted.
-
-If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]" semble` in its place.
 
 ## Workflow
 
@@ -229,8 +226,6 @@ semble find-related src/auth.py 42 ./my-project
 ```
 
 `path` defaults to the current directory when omitted; git URLs are accepted.
-
-If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]" semble` in its place.
 
 ## How it works
 
