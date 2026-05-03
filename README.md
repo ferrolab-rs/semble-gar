@@ -1,37 +1,54 @@
 
 <h2 align="center">
   <img width="30%" alt="semble logo" src="https://raw.githubusercontent.com/MinishLab/semble/main/assets/images/semble_logo.png"><br/>
-  Fast and Accurate Code Search with Graph-Augmented Retrieval for Agents<br/>
-  <sub>Hybrid search + relational code graph. Uses ~98% fewer tokens than grep+read.</sub>
+  Semble-GAR: Graph-Augmented Retrieval for Code Search<br/>
+  <sub>Fork of <a href="https://github.com/MinishLab/semble">MinishLab/semble</a> — adds SQLite + tree-sitter relational code graph</sub>
 </h2>
 
 <div align="center">
-  <h2>
-    <a href="https://pypi.org/project/semble/"><img src="https://img.shields.io/pypi/v/semble?color=%23007ec6&label=pypi%20package" alt="Package version"></a>
-    <a href="https://app.codecov.io/gh/ferrolab-rs/semble-gar">
-      <img src="https://codecov.io/gh/ferrolab-rs/semble-gar/graph/badge.svg?token=SZKRFKPPCG" alt="Codecov">
-    </a>
-    <a href="https://github.com/ferrolab-rs/semble-gar/blob/main/LICENSE">
-      <img src="https://img.shields.io/badge/license-MIT-green" alt="License - MIT">
-    </a>
-  </h2>
+
+[![Fork](https://img.shields.io/badge/fork-MinishLab%2Fsemble-blue)](https://github.com/MinishLab/semble)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/ferrolab-rs/semble-gar/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+
+<br/>
+
+**Hybrid search (semantic + BM25) + relational code graph.**<br/>
+**Understand not just *what* matches, but *how* the code connects.**
+
+<br/>
 
 [Quickstart](#quickstart) •
+[What's new](#whats-new-vs-upstream) •
 [Main Features](#main-features) •
 [MCP Server](#mcp-server) •
-[CLI](#cli) •
 [How it works](#how-it-works) •
 [Benchmarks](#benchmarks)
 
 </div>
 
-Semble is a code search library built for agents. It combines hybrid search (semantic + BM25) with a **Graph-Augmented Retrieval** layer that extracts the code's relational structure — who calls what, which files import which symbols — and uses it to boost structurally important code and enrich results with dependency context. It returns the exact code snippets agents need instantly, using ~98% fewer tokens than grep+read. Indexing and searching a full codebase end-to-end takes under a second, with ~200x faster indexing and ~10x faster queries than a code-specialized transformer, at 99% of its retrieval quality (see [benchmarks](#benchmarks)). Everything runs on CPU with no API keys, GPU, or external services. Run it as an [MCP server](#mcp-server) and any agent (Claude Code, Cursor, Codex, OpenCode, etc.) gets instant access to any repo, cloned and indexed on demand.
+> **Note:** this is a fork of [MinishLab/semble](https://github.com/MinishLab/semble) enhanced with a **Graph-Augmented Retrieval** layer. All original hybrid search features are preserved. The graph layer adds relational context (`called_by` / `depends_on`) to every search result and boosts structurally important code via graph centrality — with zero new dependencies.
+
+## What's new vs upstream
+
+| Feature | Original Semble | Semble-GAR |
+|---|---|---|
+| Search | Hybrid (semantic + BM25 + RRF) | Hybrid + graph centrality boost |
+| Code graph | None | SQLite call + import graph (cross-file) |
+| Symbols extracted | None | Functions, classes via tree-sitter |
+| Imports resolved | None | `from X import Y` → scoped cross-file edges |
+| Result context | Text only | JSON with `called_by` / `depends_on` |
+| MCP output | Markdown blocks | JSON with relational metadata |
+| Fallback | N/A | Silent vector-only on parse errors |
+| New dependencies | — | **Zero** (sqlite3 stdlib, tree-sitter from Chonkie) |
+| Upstream tests | 116 | 116 (all passing, no regression) |
 
 ## Quickstart
 
 ```bash
-pip install semble  # Install with pip
-uv add semble       # Install with uv
+git clone https://github.com/ferrolab-rs/semble-gar.git
+cd semble-gar
+pip install -e ".[dev]"   # Install in editable mode
 ```
 
 ```python
@@ -78,19 +95,26 @@ Semble can run as an MCP server so agents can search any codebase directly. Repo
 
 ### Setup
 
-> Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) to be installed.
+> Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and a local clone.
+
+```bash
+git clone https://github.com/ferrolab-rs/semble-gar.git
+cd semble-gar
+pip install -e ".[mcp]"
+```
+
+Then configure your agent to run `semble`:
 
 #### Claude Code
 ```bash
-claude mcp add semble -s user -- uvx --from "semble[mcp]" semble
+claude mcp add semble -s user -- semble
 ```
 
 #### Codex
 Add to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.semble]
-command = "uvx"
-args = ["--from", "semble[mcp]", "semble"]
+command = "semble"
 ```
 
 #### OpenCode
@@ -100,7 +124,7 @@ Add to `~/.opencode/config.json`:
   "mcp": {
     "semble": {
       "type": "local",
-      "command": ["uvx", "--from", "semble[mcp]", "semble"]
+      "command": ["semble"]
     }
   }
 }
@@ -112,8 +136,7 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 {
   "mcpServers": {
     "semble": {
-      "command": "uvx",
-      "args": ["--from", "semble[mcp]", "semble"]
+      "command": "semble"
     }
   }
 }
