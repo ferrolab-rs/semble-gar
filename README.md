@@ -338,7 +338,16 @@ Agents using grep+read spend most of their context budget on irrelevant code. Se
 
 ![Token efficiency: recall vs. retrieved tokens](https://raw.githubusercontent.com/MinishLab/semble/main/assets/images/token_efficiency.png)
 
-Semble uses **98% fewer tokens** on average, and reaches 94% recall at a budget of only 2k tokens, while grep+read needs a full 100k context window to reach 85%. See [benchmarks](benchmarks/README.md#token-efficiency) for details.
+Semble uses **~98% fewer tokens** on average, and reaches 94% recall at a budget of only 2k tokens, while grep+read needs a full 100k context window to reach 85%. These numbers are from the upstream benchmark (identical hybrid search backbone). The GAR layer adds:
+
+| Field | Overhead per result | Notes |
+|---|---|---|
+| `context` (called_by/depends_on) | ~100-200 chars | Relational metadata |
+| `symbols` | ~50-100 chars | Function/class names in chunk |
+| `file_total_lines` | ~25 chars | Chunk completeness signal |
+| `compact=true` | **-60%** | Omits `code` field entirely |
+
+> Net effect: +5% overhead in full mode, **-55% in compact mode**. See [benchmarks](benchmarks/README.md#token-efficiency) for details.
 
 ## License
 
