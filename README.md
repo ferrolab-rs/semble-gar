@@ -33,7 +33,7 @@
 
 | Feature | Original Semble | Semble-GAR |
 |---|---|---|
-| Search | Hybrid (semantic + BM25 + RRF) | Hybrid + graph centrality boost |
+| Search | Hybrid (semantic + BM25 + RRF) | Hybrid (NDCG@10 identical) |
 | Code graph | None | SQLite call + import graph (cross-file) |
 | Symbols extracted | None | Functions, classes via tree-sitter |
 | Imports resolved | None | `from X import Y` → scoped cross-file edges |
@@ -244,12 +244,12 @@ Semble splits each file into code-aware chunks using [Chonkie](https://github.co
 
 At query time, Semble scores every query against the chunks with two complementary retrievers: static [Model2Vec](https://github.com/MinishLab/model2vec) embeddings using the code-specialized [potion-code-16M](https://huggingface.co/minishlab/potion-code-16M) model for semantic similarity, and [BM25](https://github.com/xhluca/bm25s) for lexical matches on identifiers and API names. The two score lists are fused with Reciprocal Rank Fusion (RRF).
 
-After fusing, chunks are boosted by their **graph centrality** (degree in the call+import graph), so well-connected "hub" functions rank higher. Results are then enriched with relational context (`called_by` / `depends_on`) so agents understand not just *what* matches, but *how* the code fits into the codebase structure. Finally, results are reranked with a set of code-aware signals:
+After fusing, results are enriched with relational context (`called_by` / `depends_on`) so agents understand not just *what* matches, but *how* the code fits into the codebase structure. A graph centrality boost is applied (NDCG-neutral on upstream benchmarks), and results are reranked with a set of code-aware signals:
 
 <details>
 <summary><b>Ranking signals</b></summary>
 
-- **Graph centrality boost.** Chunks with high degree in the code relationship graph (many callers, many dependencies) are boosted — structurally important "hub" functions surface above isolated utilities.
+- **Relational context.** Every result is enriched with `called_by` / `depends_on` and `symbols` so agents understand how the code connects without reading files. A `trace_symbol` MCP tool enables call-graph navigation. Graph centrality boost is applied but is NDCG-neutral — the relational metadata is the real value.
 - **Adaptive weighting.** Symbol-like queries (`Foo::bar`, `_private`, `getUserById`) get more lexical weight, while natural-language queries stay balanced between semantic and lexical retrievers.
 - **Definition boosts.** A chunk that defines the queried symbol (a `class`, `def`, `func`, etc.) is ranked above chunks that merely reference it.
 - **Identifier stems.** Query tokens are stemmed and matched against identifier stems in a chunk, giving an additional weight to chunks that contain them. For example, querying `parse config` boosts chunks containing `parseConfig`, `ConfigParser`, or `config_parser`.
@@ -298,16 +298,16 @@ Measured on 21 Python files (~2 500 lines) — the `src/semble` codebase itself:
 
 ### Graph boost ablation
 
-Simulated on 1 000 queries using real graph centrality values from `src/semble` (21 files, 127 symbols, 222 edges). Each query is assigned synthetic RRF scores; the boost is applied and ranking changes are measured.
+**Full upstream benchmark** on 26 repos, 521 queries, 19 languages. Compares `_GRAPH_BOOST=0.4` vs baseline (no graph boost).
 
-| Metric | Value |
-|---|---|
-| Hub promotions (centrality > 0.5) | **+18 053 positions net** |
-| Isolated demotions (centrality = 0) | **0 positions** |
-| Top-10 volatility | 4.1 changes/query (~60% stable) |
-| Max single-chunk promotion | +16 ranks |
+| Metric | Baseline | GAR | Delta |
+|---|---|---|---|
+| Avg NDCG@10 | 0.8715 | 0.8706 | **-0.0009** |
+| Wins | — | 6 repos | — |
+| Ties | — | 12 repos | — |
+| Losses | — | 8 repos | — |
 
-> The boost is **surgical**: it promotes structurally important hub functions without ever penalizing isolated chunks (their score is multiplied by 1.0). A full NDCG@10 ablation against the upstream benchmark suite is pending.
+> **The graph centrality boost is statistically neutral on NDCG@10.** It does not harm ranking quality but does not consistently improve it either. The value of the GAR layer lies in the **relational context** (`called_by` / `depends_on`), the **`trace_symbol`** tool for call-graph navigation, and the **`file_total_lines`** field for detecting partial chunks — not in the centrality re-ranking. The boost is kept at a conservative 0.4; lowering it further would have no measurable impact.
 
 ### Token efficiency
 
