@@ -327,17 +327,17 @@ class GraphStore:
         ]
 
     def _get_importers(self, file_path: str) -> list[dict]:
-        """Return symbol info for chunks that import from *file_path*."""
+        """Return ``{file, chunk_id}`` for chunks that import from *file_path*."""
         rows = self.conn.execute(
-            "SELECT DISTINCT s.name, s.file, s.chunk_id FROM edges e "
+            "SELECT DISTINCT s.file, s.chunk_id FROM edges e "
             "JOIN symbols s ON s.id = e.source_id "
             "WHERE s.name = '*import*' AND e.target_id IN "
             "(SELECT id FROM symbols WHERE file = ? AND name NOT IN ('*import*', '*module*'))",
             (file_path,),
         ).fetchall()
         return [
-            {"symbol": r[0], "file": r[1], "chunk_id": r[2]}
-            for r in rows if not r[2].endswith(":0-0")
+            {"file": r[0], "chunk_id": r[1]}
+            for r in rows if not r[1].endswith(":0-0")
         ]
 
     def _get_related_chunks(self, symbol_id: int) -> list[str]:
