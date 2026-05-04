@@ -75,7 +75,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         if not results:
             return "No results found."
         contexts = index.get_context_for_results(results)
-        return _format_results_json(results, contexts, compact=compact)
+        syms = _collect_symbols(index, results)
+        return _format_results_json(results, contexts, compact=compact, symbols=syms)
 
     @server.tool()
     async def find_related(
@@ -116,7 +117,8 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         if not results:
             return f"No related chunks found for {file_path}:{line}."
         contexts = index.get_context_for_results(results)
-        return _format_results_json(results, contexts, compact=compact)
+        syms = _collect_symbols(index, results)
+        return _format_results_json(results, contexts, compact=compact, symbols=syms)
 
     @server.tool()
     async def trace_symbol(
@@ -181,6 +183,16 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         }, ensure_ascii=False)
 
     return server
+
+
+def _collect_symbols(index: SembleIndex, results: list) -> dict[str, list[dict]]:
+    """Return ``{chunk_id: [symbol_dicts]}`` for results that have symbols."""
+    symbols: dict[str, list[dict]] = {}
+    for r in results:
+        syms = index.get_symbols_for_chunk(r.chunk)
+        if syms:
+            symbols[r.chunk.location] = syms
+    return symbols
 
 
 async def serve(path: str | None = None, ref: str | None = None) -> None:

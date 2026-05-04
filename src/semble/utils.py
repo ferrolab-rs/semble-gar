@@ -58,12 +58,17 @@ def _format_results_json(
     contexts: dict[str, GraphContext] | None = None,
     *,
     compact: bool = False,
+    symbols: dict[str, list[dict]] | None = None,
 ) -> str:
     """Render SearchResult objects as JSON with relational metadata.
 
     When *compact* is True, the ``code`` field is omitted to save tokens.
+    When *symbols* is provided (chunk_id → [{id, name, type}, ...]),
+    each result includes its symbols so the agent can chain trace_symbol
+    without a separate explore_graph call.
     """
     contexts = contexts or {}
+    symbols = symbols or {}
     output: list[dict] = []
     for r in results:
         ctx = contexts.get(r.chunk.location, GraphContext())
@@ -80,6 +85,9 @@ def _format_results_json(
         }
         if not compact:
             entry["code"] = r.chunk.content
+        syms = symbols.get(r.chunk.location)
+        if syms:
+            entry["symbols"] = syms
         output.append(entry)
     return json.dumps(output, ensure_ascii=False)
 
