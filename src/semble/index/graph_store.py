@@ -279,13 +279,16 @@ class GraphStore:
         if not symbol_rows:
             return {"found": False, "name": name}
 
+        # Batch centrality: compute once for all related chunk_ids, not per symbol.
+        all_related: set[str] = set()
+        for sid, _sname, _stype, _sfile, schunk_id in symbol_rows:
+            all_related.add(schunk_id)
+            all_related.update(self._get_related_chunks(sid))
+        cent_map = self.get_graph_centrality(list(all_related))
+
         results: list[dict] = []
-
         for sid, sname, stype, sfile, schunk_id in symbol_rows:
-            chunk_ids_for_cent = list({schunk_id} | set(self._get_related_chunks(sid)))
-            cent_map = self.get_graph_centrality(chunk_ids_for_cent)
             centrality = cent_map.get(schunk_id, 0.0)
-
             callers = self._get_edge_endpoints(sid, "incoming")
             callees = self._get_edge_endpoints(sid, "outgoing")
             imported_by = self._get_importers(sfile)
