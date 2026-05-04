@@ -152,10 +152,33 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 
 | Tool | Description |
 |------|-------------|
-| `search` | Search a codebase with a natural-language or code query. Pass `repo` as a git URL or local path. Supports `compact=true` to omit code content and save tokens. Returns relational context + symbols when available. |
-| `find_related` | Given a file path and line number, return chunks semantically similar to the code at that location, with relational metadata. |
-| `trace_symbol` | Traverse the call graph by function or class name. Returns callers, callees, centrality scores, and import relationships — a full neighbourhood of the symbol without reading files. |
-| `explore_graph` | For a specific file+line, return the relational context (called_by/depends_on) plus the symbols defined at that location. |
+| `search` | Find code by intent. Supports `compact=true` to save tokens (omits code content). Returns `called_by` / `depends_on` / `symbols` so you can chain directly to `trace_symbol`. |
+| `trace_symbol` | **"Who calls this? What does it call?"** — pass a function name, get its callers, callees, and centrality. No file reading needed. |
+| `explore_graph` | "What symbols are in this chunk, and how is it connected?" — relational context for any location. |
+| `find_related` | "What code is similar to this?" — semantic similarity search from a known location. |
+
+#### Why this matters
+
+Traditional grep+read workflow for understanding a function `resolve_alpha`:
+
+```
+grep "resolve_alpha"        → 50 matches, 800 tokens
+Read ranking/__init__.py     → 5 lines, re-export only
+Read ranking/weighting.py    → 11 lines, found definition
+grep "resolve_alpha" src/    → found callers in search.py
+Read search.py               → 160 lines, found search_hybrid calls it
+Total: ~5 calls, ~8000 tokens
+```
+
+With Semble-GAR:
+
+```
+search "resolve_alpha"       → symbols: [resolve_alpha], depends_on: [ranking/weighting.py]
+trace_symbol "resolve_alpha" → callers: [search_hybrid], callees: [is_symbol_query]
+Total: ~2 calls, ~800 tokens
+```
+
+**10x fewer tokens per exploration task.** The `file_total_lines` field (e.g. `"file_total_lines": 200`) tells you whether a chunk is partial so you know when to Read.
 
 Each result from `search` / `find_related` is returned as JSON:
 
