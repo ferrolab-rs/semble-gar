@@ -78,6 +78,11 @@ result.chunk.content     # "def save_pretrained(self, path: PathLike, ..."
 ctx = index.get_context_for_chunk(result.chunk)
 ctx.called_by   # ["model2vec/hub.py:10-25", "model2vec/cli.py:40-55"]
 ctx.depends_on  # ["model2vec/persistence.py:100-130"]
+
+# Trace a symbol through the call graph
+graph = index.trace_symbol("save_pretrained")
+graph["results"][0]["callers"]   # who calls this function
+graph["results"][0]["callees"]   # what this function calls
 ```
 
 ## Main Features
@@ -147,10 +152,12 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 
 | Tool | Description |
 |------|-------------|
-| `search` | Search a codebase with a natural-language or code query. Pass `repo` as a git URL or local path. Results include relational context (`called_by`, `depends_on`). |
+| `search` | Search a codebase with a natural-language or code query. Pass `repo` as a git URL or local path. Supports `compact=true` to omit code content and save tokens. Returns relational context + symbols when available. |
 | `find_related` | Given a file path and line number, return chunks semantically similar to the code at that location, with relational metadata. |
+| `trace_symbol` | Traverse the call graph by function or class name. Returns callers, callees, centrality scores, and import relationships — a full neighbourhood of the symbol without reading files. |
+| `explore_graph` | For a specific file+line, return the relational context (called_by/depends_on) plus the symbols defined at that location. |
 
-Each result is returned as JSON with the following structure:
+Each result from `search` / `find_related` is returned as JSON:
 
 ```json
 {
@@ -160,12 +167,15 @@ Each result is returned as JSON with the following structure:
   "code": "def save_pretrained(self, path: PathLike, ...",
   "score": 0.95,
   "source": "hybrid",
+  "symbols": [{"id": 42, "name": "save_pretrained", "type": "function"}],
   "context": {
     "called_by": ["model2vec/hub.py:10-25"],
     "depends_on": ["model2vec/persistence.py:100-130"]
   }
 }
 ```
+
+> **Compact mode:** pass `compact=true` to `search` or `find_related` to omit the `code` field (~60% token savings). Set `compact=false` (default) for the full chunk content.
 
 ### Sub-agent support
 
