@@ -23,6 +23,7 @@ semble find-related src/auth.py 42 ./my-project
 ## Workflow
 
 1. Start with `semble search` to find relevant chunks.
-2. Inspect full files only when the returned chunk is not enough context.
+2. Check `file_total_lines` in the output — if the chunk is small relative to the file, Read the full file.
 3. Optionally use `semble find-related` with a promising result's `file_path` and `line` to discover related implementations.
 4. Use grep only when you need exhaustive literal matches or quick confirmation of an exact string.
+5. For call-graph exploration (`called_by`/`depends_on`, `trace_symbol`), delegate to the main agent — MCP tools are not available in sub-agent context.

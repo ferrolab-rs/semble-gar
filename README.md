@@ -152,10 +152,10 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 
 | Tool | Description |
 |------|-------------|
-| `search` | Find code by intent. Supports `compact=true` to save tokens (omits code content). Returns `called_by` / `depends_on` / `symbols` so you can chain directly to `trace_symbol`. |
-| `trace_symbol` | **"Who calls this? What does it call?"** — pass a function name, get its callers, callees, and centrality. No file reading needed. |
-| `explore_graph` | "What symbols are in this chunk, and how is it connected?" — relational context for any location. |
-| `find_related` | "What code is similar to this?" — semantic similarity search from a known location. |
+| `search(query, repo?, mode?, top_k?, filter_languages?, filter_paths?, compact?)` | Find code by intent. Supports `compact=true` to show only the first line of code (~60% token savings). Returns `called_by` / `depends_on` / `symbols` so you can chain directly to `trace_symbol`. |
+| `trace_symbol(symbol, repo?)` | **"Who calls this? What does it call?"** — pass a function name, get its callers, callees, centrality, and importers. No file reading needed. |
+| `explore_graph(file_path, line, repo?)` | "What symbols are here, and how is it connected?" — relational context for any file location. |
+| `find_related(file_path, line, repo?, top_k?, compact?)` | "What code is similar to this?" — semantic similarity from a known location. |
 
 #### Why this matters
 
@@ -233,12 +233,44 @@ semble find-related src/auth.py 42 ./my-project
 
 `path` defaults to the current directory when omitted; git URLs are accepted.
 
+> **Note:** `trace_symbol` and `explore_graph` are MCP-only tools. Sub-agents (Bash-only) should delegate graph exploration to the main agent. The CLI supports `search`, `find-related`, and `init`.
+
+### trace_symbol output example
+
+```json
+{
+  "found": true,
+  "name": "resolve_alpha",
+  "results": [{
+    "symbol": "resolve_alpha",
+    "type": "function",
+    "file": "ranking/weighting.py",
+    "centrality": 0.286,
+    "callers": [{"symbol": "search_hybrid", "file": "search.py", "relation": "calls"}],
+    "callees": [{"symbol": "is_symbol_query", "file": "ranking/boosting.py", "relation": "calls"}],
+    "imported_by": [{"file": "search.py", "chunk_id": "search.py:1-161"}]
+  }]
+}
+```
+
+### explore_graph output example
+
+```json
+{
+  "location": "search.py:1-161",
+  "symbols": [{"id": 5, "name": "search_hybrid", "type": "function"}],
+  "called_by": ["index/index.py:185-230"],
+  "depends_on": ["ranking/weighting.py:1-11"]
+}
+```
+
 ## Workflow
 
-1. Start with `semble search` to find relevant chunks.
-2. Inspect full files only when the returned chunk is not enough context.
-3. Optionally use `semble find-related` with a promising result's `file_path` and `line` to discover related implementations.
-4. Use grep only when you need exhaustive literal matches or quick confirmation of an exact string.
+1. **`search`** to find relevant code. Check `file_total_lines` — if the chunk is small relative to the file, Read the full file.
+2. **`trace_symbol`** on promising function names to understand the call graph without reading files.
+3. **`explore_graph`** on a specific location to get its relational context and symbols.
+4. **`find_related`** on a result's `file_path` and `line` to discover semantically similar implementations.
+5. Use **grep** or **Read** only when you need exhaustive literal matches or the full file context.
 ```
 
 ## CLI
