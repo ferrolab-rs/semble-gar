@@ -25,10 +25,10 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
     server = FastMCP(
         "semble",
         instructions=(
-            "Instant code search for any local or GitHub repository. "
-            "Call `search` to find relevant code; call `find_related` on a result to discover similar code elsewhere. "
-            "For questions about a library (e.g. a PyPI/npm package), resolve the GitHub URL from your training "
-            "knowledge and pass it as `repo`. "
+            "Instant code search with graph-augmented retrieval for any local or GitHub repository. "
+            "Use `search` to find code by intent, `trace_symbol` to navigate the call graph (callers/callees), "
+            "`explore_graph` for a chunk's relational context, and `find_related` for semantically similar code. "
+            "For external libraries, resolve the GitHub URL from your training knowledge and pass it as `repo`. "
             "Prefer these tools over Grep, Glob, or Read for any question about how code works."
         ),
     )
@@ -50,6 +50,10 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             list[str] | None,
             Field(description="Restrict results to these repo-relative file paths."),
         ] = None,
+        compact: Annotated[
+            bool,
+            Field(description="If true, omit code content to save tokens. Use for broad exploration."),
+        ] = False,
     ) -> str:
         """Search a codebase with a natural-language or code query.
 
@@ -71,7 +75,7 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         if not results:
             return "No results found."
         contexts = index.get_context_for_results(results)
-        return _format_results_json(results, contexts)
+        return _format_results_json(results, contexts, compact=compact)
 
     @server.tool()
     async def find_related(
@@ -82,6 +86,10 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         line: Annotated[int, Field(description="Line number (1-indexed).")],
         repo: Annotated[str | None, Field(description=_REPO_DESCRIPTION)] = None,
         top_k: Annotated[int, Field(description="Number of similar chunks to return.", ge=1)] = 5,
+        compact: Annotated[
+            bool,
+            Field(description="If true, omit code content to save tokens."),
+        ] = False,
     ) -> str:
         """Find code chunks semantically similar to a specific location in a file.
 
@@ -98,7 +106,7 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
             index = await cache.get(source)
         except Exception as exc:
             return f"Failed to index {source!r}: {exc}"
-        chunk = _resolve_chunk(index.chunks, file_path, line)
+        chunk = _resolve_chunk(index.chunks, file_path, line, file_mapping=index._file_mapping)
         if chunk is None:
             return (
                 f"No chunk found at {file_path}:{line}. "
@@ -108,7 +116,7 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         if not results:
             return f"No related chunks found for {file_path}:{line}."
         contexts = index.get_context_for_results(results)
-        return _format_results_json(results, contexts)
+        return _format_results_json(results, contexts, compact=compact)
 
     @server.tool()
     async def trace_symbol(
@@ -158,7 +166,7 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         except Exception as exc:
             return f"Failed to index {source!r}: {exc}"
 
-        chunk = _resolve_chunk(index.chunks, file_path, line)
+        chunk = _resolve_chunk(index.chunks, file_path, line, file_mapping=index._file_mapping)
         if chunk is None:
             return f"No chunk found at {file_path}:{line}."
 
