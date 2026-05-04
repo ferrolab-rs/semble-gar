@@ -198,7 +198,7 @@ Each result from `search` / `find_related` is returned as JSON:
 }
 ```
 
-> **Compact mode:** pass `compact=true` to `search` or `find_related` to omit the `code` field (~60% token savings). Set `compact=false` (default) for the full chunk content.
+> **Compact mode:** pass `compact=true` to `search` or `find_related` to get only the first line of code (~60% token savings). Set `compact=false` (default) for the full chunk content.
 
 ### Sub-agent support
 
