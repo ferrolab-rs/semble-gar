@@ -5,7 +5,7 @@ import re
 
 from semble.types import Chunk, GraphContext, SearchResult
 
-_GIT_URL_SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://", "file://")
+_GIT_URL_SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://")
 _SCP_GIT_URL_RE = re.compile(r"^[\w.-]+@[\w.-]+:(?!/)")
 
 
@@ -83,8 +83,11 @@ def _format_results_json(
                 "depends_on": ctx.depends_on,
             },
         }
-        if not compact:
+        if compact is False:
             entry["code"] = r.chunk.content
+        elif compact is True:
+            # First line only (typically the function/class signature).
+            entry["code"] = r.chunk.content.split("\n")[0].strip()
         syms = symbols.get(r.chunk.location)
         if syms:
             entry["symbols"] = syms

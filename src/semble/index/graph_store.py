@@ -280,19 +280,24 @@ class GraphStore:
         """Return ``{*import*_chunk_id: [real_chunk_ids_for_that_file]}``.
 
         Built lazily on first call and cached (the import symbols don't change
-        after indexing).
+        after indexing).  Uses a single JOIN query instead of N sub-queries.
         """
         if self._import_map_cache is None:
+            rows = self.conn.execute("""
+                SELECT i.chunk_id, r.chunk_id
+                FROM symbols i
+                JOIN symbols r ON r.file = i.file
+                    AND r.name NOT IN ('*import*', '*module*')
+                WHERE i.name = '*import*'
+            """).fetchall()
             mapping: dict[str, list[str]] = {}
-            import_rows = self.conn.execute(
-                "SELECT file, chunk_id FROM symbols WHERE name = '*import*'",
-            ).fetchall()
-            for file, cid in import_rows:
-                real = self.conn.execute(
-                    "SELECT DISTINCT chunk_id FROM symbols WHERE file = ? AND name NOT IN ('*import*', '*module*')",
-                    (file,),
-                ).fetchall()
-                mapping[cid] = [r[0] for r in real]
+            for icid, rcid in rows:
+                mapping.setdefault(icid, []).append(rcid)
+            # Preserve entries for files with imports but no real symbols.
+            for (cid,) in self.conn.execute(
+                "SELECT chunk_id FROM symbols WHERE name = '*import*'"
+            ).fetchall():
+                mapping.setdefault(cid, [])
             self._import_map_cache = mapping
         return self._import_map_cache
 

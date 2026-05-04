@@ -29,6 +29,7 @@ async def _call_tool(
     fake_index = MagicMock()
     getattr(fake_index, index_method).return_value = index_return
     fake_index.get_context_for_results.return_value = {}
+    fake_index.get_symbols_for_chunk.return_value = []
     if index_chunks is not None:
         fake_index.chunks = index_chunks
     with patch("semble.mcp.SembleIndex.from_path", return_value=fake_index):
