@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Hybrid code search: semantic (Model2Vec) + lexical (BM25) with RRF fusion.
+__doc__ = """Hybrid code search: semantic (Model2Vec) + lexical (BM25) with RRF fusion.
 
 Graph-augmented retrieval boosts structurally important chunks via
 centrality in the code relationship graph.
