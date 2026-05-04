@@ -224,22 +224,53 @@ class GraphStore:
         return contexts
 
     def get_graph_centrality(self, chunk_ids: list[str]) -> dict[str, float]:
-        """Return normalised degree centrality for each chunk_id."""
+        """Return normalised degree centrality using direct COUNT queries.
+
+        Avoids the full get_relational_context pipeline — uses 2 grouped
+        COUNT queries instead, making it suitable for the hot search path.
+        """
         if not chunk_ids:
             return {}
 
-        contexts = self.get_relational_context(chunk_ids)
-        raw: dict[str, float] = {}
-        degrees: list[int] = []
-        for cid, ctx in contexts.items():
-            d = len(ctx.called_by) + len(ctx.depends_on)
-            raw[cid] = float(d)
-            degrees.append(d)
+        placeholders = ",".join("?" * len(chunk_ids))
+        symbol_rows = self.conn.execute(
+            f"SELECT id, chunk_id FROM symbols WHERE chunk_id IN ({placeholders}) "
+            "AND name NOT IN ('*import*', '*module*')",
+            chunk_ids,
+        ).fetchall()
+        sid_to_chunk: dict[int, str] = {r[0]: r[1] for r in symbol_rows}
+        all_sids = list(sid_to_chunk.keys())
 
-        max_degree = max(degrees) if degrees else 0
+        degree: dict[str, int] = {cid: 0 for cid in chunk_ids}
+        if not all_sids:
+            return {cid: 0.0 for cid in chunk_ids}
+
+        sid_p = ",".join("?" * len(all_sids))
+
+        # Outgoing: count edges FROM our symbols TO other symbols.
+        for cid, count in self.conn.execute(
+            f"SELECT s.chunk_id, COUNT(*) FROM edges e "
+            f"JOIN symbols s ON s.id = e.target_id "
+            f"WHERE e.source_id IN ({sid_p}) "
+            "AND s.name NOT IN ('*import*', '*module*') GROUP BY s.chunk_id",
+            all_sids,
+        ).fetchall():
+            degree[cid] = degree.get(cid, 0) + count
+
+        # Incoming: count edges TO our symbols FROM other symbols.
+        for cid, count in self.conn.execute(
+            f"SELECT s.chunk_id, COUNT(*) FROM edges e "
+            f"JOIN symbols s ON s.id = e.source_id "
+            f"WHERE e.target_id IN ({sid_p}) "
+            "AND s.name NOT IN ('*import*', '*module*') GROUP BY s.chunk_id",
+            all_sids,
+        ).fetchall():
+            degree[cid] = degree.get(cid, 0) + count
+
+        max_degree = max(degree.values()) if degree else 0
         if max_degree == 0:
             return {cid: 0.0 for cid in chunk_ids}
-        return {cid: raw[cid] / float(max_degree) for cid in chunk_ids}
+        return {cid: degree[cid] / float(max_degree) for cid in chunk_ids}
 
     # ------------------------------------------------------------------
     # Internal helpers
