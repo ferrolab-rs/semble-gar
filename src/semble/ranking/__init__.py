@@ -1,3 +1,5 @@
+"""Ranking signals: adaptive weighting, definition boosts, path penalties."""
+
 from semble.ranking.boosting import apply_query_boost, boost_multi_chunk_files
 from semble.ranking.penalties import rerank_topk
 from semble.ranking.weighting import resolve_alpha

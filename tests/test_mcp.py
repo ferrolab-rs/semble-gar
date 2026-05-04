@@ -70,7 +70,7 @@ def test_resolve_chunk() -> None:
         ("git://github.com/org/repo", True),
         ("ssh://git@github.com/org/repo", True),
         ("git+ssh://git@github.com/org/repo", True),
-        ("file:///tmp/repo", True),
+        ("file:///tmp/repo", False),  # file:// removed for security
         ("git@github.com:org/repo", True),  # scp-like
         ("/local/path/to/repo", False),
         ("./relative/path", False),

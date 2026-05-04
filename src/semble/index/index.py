@@ -88,6 +88,10 @@ class SembleIndex:
         :return: An indexed SembleIndex. Chunk file paths are relative to ``path``.
         :raises FileNotFoundError: If `path` does not exist.
         :raises NotADirectoryError: If `path` exists but is not a directory.
+
+        Example:
+            >>> index = SembleIndex.from_path("./my-project")
+            >>> results = index.search("authentication flow", top_k=5)
         """
         model = model or load_model()
         path = Path(path)
@@ -134,6 +138,11 @@ class SembleIndex:
         :param include_text_files: If True, also index non-code text files (.md, .yaml, .json, etc.).
         :return: An indexed SembleIndex. Chunk file paths are repo-relative (e.g. ``src/foo.py``).
         :raises RuntimeError: If git is not on PATH or the clone fails.
+
+        Example:
+            >>> index = SembleIndex.from_git("https://github.com/org/repo")
+            >>> index.stats.indexed_files
+            42
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
             # `--` prevents `url` from being interpreted as a git option (e.g. `--upload-pack=...`).
@@ -208,6 +217,11 @@ class SembleIndex:
             chunks from these files are returned.
         :return: Ranked list of :class:`SearchResult` objects, best match first.
         :raises ValueError: If `mode` is not a recognised search strategy.
+
+        Example:
+            >>> results = index.search("save model to disk", top_k=3)
+            >>> results[0].chunk.file_path
+            'model2vec/model.py'
         """
         bm25_index, semantic_index = self._bm25_index, self._semantic_index
         if not self.chunks or not query.strip():
@@ -266,6 +280,11 @@ class SembleIndex:
 
         Delegates to the graph store.  Returns ``{"found": False}`` if
         no graph data is available or the symbol is unknown.
+
+        Example:
+            >>> result = index.trace_symbol("search_hybrid")
+            >>> result["results"][0]["centrality"]
+            1.0
         """
         if not self._graph_store:
             return {"found": False, "name": name}
