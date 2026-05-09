@@ -322,8 +322,40 @@ def _walk_edges(node, source: str, edges: list[dict], import_map: dict[str, str]
         # Store alias→original mappings for call-edge resolution.
         alias_map.update(aliases)
 
+    elif kind in _CLASS_NODE_TYPES:
+        _extract_inheritance(node, edges)
+
     for child in node.children:
         _walk_edges(child, source, edges, import_map, wildcard_modules, alias_map)
+
+
+def _extract_inheritance(node, edges: list[dict]) -> None:
+    """Extract ``inherits`` edges from a class definition node."""
+    class_name = _child_text(node, _CLASS_NAME_FIELDS)
+    if not class_name:
+        return
+
+    parents: list[str] = []
+    # Python: class Child(Parent) → field "superclasses"
+    superclasses = node.child_by_field_name("superclasses")
+    if superclasses:
+        for child in superclasses.children:
+            if child.type in ("identifier", "attribute"):
+                text = child.text.decode("utf-8") if isinstance(child.text, bytes) else child.text
+                if text:
+                    parents.append(text)
+    # JS/TS/C#/C++: extends_clause, class_heritage, base_class_clause
+    for child_node in node.children:
+        if child_node.type in ("extends_clause", "class_heritage", "base_class_clause"):
+            for child in child_node.children:
+                if child.type in ("identifier", "type_identifier", "scoped_type_identifier"):
+                    text = child.text.decode("utf-8") if isinstance(child.text, bytes) else child.text
+                    if text:
+                        parents.append(text)
+
+    for parent_name in parents:
+        if _is_meaningful_symbol(parent_name):
+            edges.append({"source": class_name, "target": parent_name, "type": "inherits"})
 
 
 def _extract_import_info(node) -> tuple[str | None, list[str], bool, dict[str, str]]:

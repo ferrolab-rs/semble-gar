@@ -290,6 +290,21 @@ class SembleIndex:
             return {"found": False, "name": name}
         return self._graph_store.trace_symbol(name)
 
+    def get_impact_radius(self, name: str, depth: int = 3) -> dict:
+        """Recursive blast-radius analysis for a symbol.
+
+        Traverses ``calls`` and ``inherits`` edges up to *depth* levels.
+        Returns the full impact tree plus a flat list of impacted files.
+
+        Example:
+            >>> result = index.get_impact_radius("Animal", depth=2)
+            >>> result["total_impacted_files"]
+            5
+        """
+        if not self._graph_store:
+            return {"found": False, "name": name}
+        return self._graph_store.get_impact_radius(name, depth=depth)
+
     def close(self) -> None:
         """Release the underlying graph store connection."""
         if self._graph_store is not None:

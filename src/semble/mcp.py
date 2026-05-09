@@ -27,6 +27,7 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         instructions=(
             "Instant code search with graph-augmented retrieval for any local or GitHub repository. "
             "Use `search` to find code by intent, `trace_symbol` to navigate the call graph (callers/callees), "
+            "`get_impact_radius` for recursive blast-radius analysis (all callers + subclasses up to N levels), "
             "`explore_graph` for a chunk's relational context, and `find_related` for semantically similar code. "
             "For external libraries, resolve the GitHub URL from your training knowledge and pass it as `repo`. "
             "Prefer these tools over Grep, Glob, or Read for any question about how code works."
@@ -119,6 +120,28 @@ def create_server(cache: _IndexCache, default_source: str | None = None) -> Fast
         contexts = index.get_context_for_results(results)
         syms = _collect_symbols(index, results)
         return _format_results_json(results, contexts, compact=compact, symbols=syms)
+
+    @server.tool()
+    async def get_impact_radius(
+        symbol: Annotated[str, Field(description="Function or class name to analyze.")],
+        repo: Annotated[str | None, Field(description=_REPO_DESCRIPTION)] = None,
+        depth: Annotated[int, Field(description="Recursion depth for caller/inheritance traversal (1-10).", ge=1, le=10)] = 3,
+    ) -> str:
+        """Recursive blast-radius analysis: find all callers and subclasses of a symbol.
+
+        Traverses calls and inheritance edges up to `depth` levels. Returns
+        the full impact tree and a flat list of impacted files. Use before
+        modifying a function or class to understand the blast radius.
+        """
+        source = repo or default_source
+        if not source:
+            return json.dumps({"error": "No repo specified."})
+        try:
+            index = await cache.get(source)
+        except Exception as exc:
+            return json.dumps({"error": f"Failed to index {source!r}: {exc}"})
+        result = index.get_impact_radius(symbol, depth=depth)
+        return json.dumps(result, ensure_ascii=False)
 
     @server.tool()
     async def trace_symbol(

@@ -342,13 +342,66 @@ class GraphStore:
 
         return {"found": True, "name": name, "matches": len(results), "results": results}
 
+    def get_impact_radius(self, name: str, depth: int = 3) -> dict:
+        """Recursive blast-radius analysis: find all callers and subclasses of *name*.
+
+        Traverses ``calls`` and ``inherits`` edges up to *depth* levels.
+        Uses a visited set to prevent infinite loops in cyclic graphs.
+        """
+        symbol_rows = self.conn.execute(
+            "SELECT id, name, type, file, chunk_id FROM symbols "
+            "WHERE name = ? AND name NOT IN ('*import*', '*module*')",
+            (name,),
+        ).fetchall()
+        if not symbol_rows:
+            return {"found": False, "name": name}
+
+        impacted_files: set[str] = set()
+        visited_ids: set[int] = set()
+
+        def _trace(sid: int, current_depth: int) -> list[dict]:
+            if current_depth > depth or sid in visited_ids:
+                return []
+            visited_ids.add(sid)
+            callers = self.conn.execute(
+                "SELECT s.id, s.name, s.type, s.file, e.type "
+                "FROM edges e JOIN symbols s ON s.id = e.source_id "
+                "WHERE e.target_id = ? AND e.type IN ('calls', 'inherits') "
+                "AND s.name NOT IN ('*import*', '*module*')",
+                (sid,),
+            ).fetchall()
+            results: list[dict] = []
+            for rsid, rname, rtype, rfile, rel in callers:
+                impacted_files.add(rfile)
+                results.append({
+                    "symbol": rname, "type": rtype, "file": rfile,
+                    "relation": rel,
+                    "impacts": _trace(rsid, current_depth + 1),
+                })
+            return results
+
+        impact_tree: list[dict] = []
+        for sid, sname, stype, sfile, schunk in symbol_rows:
+            impacted_files.add(sfile)
+            impact_tree.append({
+                "symbol": sname, "type": stype, "file": sfile,
+                "callers": _trace(sid, 1),
+            })
+
+        return {
+            "found": True, "name": name,
+            "total_impacted_files": len(impacted_files),
+            "impacted_files": sorted(impacted_files),
+            "impact_tree": impact_tree,
+        }
+
     def _get_edge_endpoints(self, symbol_id: int, direction: str) -> list[dict]:
         """Return callers (incoming) or callees (outgoing) for a symbol."""
         if direction == "incoming":
             rows = self.conn.execute(
                 "SELECT s.id, s.name, s.type, s.file, s.chunk_id, e.type "
                 "FROM edges e JOIN symbols s ON s.id = e.source_id "
-                "WHERE e.target_id = ? AND e.type = 'calls' "
+                "WHERE e.target_id = ? AND e.type IN ('calls', 'inherits') "
                 "AND s.name NOT IN ('*import*', '*module*')",
                 (symbol_id,),
             ).fetchall()
