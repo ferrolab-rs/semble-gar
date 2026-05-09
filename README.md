@@ -153,7 +153,8 @@ Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project):
 | Tool | Description |
 |------|-------------|
 | `search(query, repo?, mode?, top_k?, filter_languages?, filter_paths?, compact?)` | Find code by intent. Supports `compact=true` to show only the first line of code (~60% token savings). Returns `called_by` / `depends_on` / `symbols` so you can chain directly to `trace_symbol`. |
-| `trace_symbol(symbol, repo?)` | **"Who calls this? What does it call?"** — pass a function name, get its callers, callees, centrality, and importers. No file reading needed. |
+| `get_impact_radius(symbol, repo?, depth?)` | **Blast-radius analysis.** Recursively finds all callers and subclasses up to N levels. Returns the full impact tree + flat list of impacted files. |
+| `trace_symbol(symbol, repo?)` | **"Who calls this? What does it call?"** — pass a function or class name, get its callers, callees, centrality, and inheritors. No file reading needed. |
 | `explore_graph(file_path, line, repo?)` | "What symbols are here, and how is it connected?" — relational context for any file location. |
 | `find_related(file_path, line, repo?, top_k?, compact?)` | "What code is similar to this?" — semantic similarity from a known location. |
 
